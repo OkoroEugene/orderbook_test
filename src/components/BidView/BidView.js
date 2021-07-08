@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
-export default function ({ bids }) {
+export default function ({ bids, zoom }) {
 
-    const [zoom, setZoom] = useState(1);
+    // const [zoom, setZoom] = useState(1);
     
     const getBuyWall = (bid) => {
         const last_item = bids.length - 1;

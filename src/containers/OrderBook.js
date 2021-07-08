@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, SafeAreaView, StyleSheet, Pressable, ScrollView, } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, SafeAreaView, StyleSheet, Pressable, ScrollView, TouchableOpacity, } from 'react-native';
 import { connect } from 'react-redux';
 import { bindActionCreators } from 'redux';
 import { updateOrderBids } from '../actions/OrderBooks/UpdateBids';
@@ -11,11 +11,12 @@ import AskView from '../components/AskView/AskView';
 import Button from '../components/Button/Button';
 
 function OrderBook(props) {
-    let wss;
 
-    const [ready, setReady] = useState(true);
     const [connecting, setConnecting] = useState(false);
+    const [disConnecting, setDisconnecting] = useState(false);
     const [connected, setConnected] = useState(false);
+    const [precision, setPrecision] = useState("P0");
+    const [zoom, setZoom] = useState(1);
 
     const {
         updateOrderBids,
@@ -26,10 +27,13 @@ function OrderBook(props) {
         }
     } = props;
 
+    const wss = useRef(null);
+
     const subscribe_msg = JSON.stringify({
         event: 'subscribe',
         channel: 'book',
-        symbol: 'tBTCUSD'
+        symbol: 'tBTCUSD',
+        prec: precision
     })
 
     const unsubscribe_msg = JSON.stringify({
@@ -37,24 +41,24 @@ function OrderBook(props) {
         channel: 'book',
     })
 
-    const connectAll = () => {
+    useEffect(() => {
+        return () => {
+            if (wss.current && wss.current.OPEN) {
+                wss.current.close();
+            }
+        };
+    }, []);
+
+    const connectAll = useCallback(async () => {
         setConnected(false);
         setConnecting(true);
-        setReady(false);
-        wss = new WebSocket('wss://api-pub.bitfinex.com/ws/2');
-        wss.onmessage = (msg) => onMessageReceived(msg);
-        wss.onopen = () => {
-            wss.send(subscribe_msg);
-        }
-    }
 
-    const disconnectAll = () => {
-        clearOrders();
-        wss.send(unsubscribe_msg);
-        wss.close();
-        setReady(true);
-        setConnected(false);
-    }
+        wss.current = new WebSocket('wss://api-pub.bitfinex.com/ws/2');
+        wss.current.onmessage = (msg) => onMessageReceived(msg);
+        wss.current.onopen = () => {
+            wss.current.send(subscribe_msg);
+        }
+    }, [updateOrderBids, updateOrderAsks])
 
     const onMessageReceived = (msg) => {
         setConnecting(false);
@@ -71,16 +75,39 @@ function OrderBook(props) {
             }
 
             if (typeof payload_data.count === 'number') {
-                if (payload_data.amount > '0.00') {
-                    updateOrderBids(payload_data);
+                if (payload_data.amount > '0') {
+                    updateBids(payload_data);
                 }
 
                 else {
-                    updateOrderAsks(payload_data);
+                    updateAsks(payload_data);
                 }
             }
         }
     }
+
+    const updateBids = useCallback((payload_data) => {
+        updateOrderBids(payload_data);
+    }, [updateOrderBids])
+
+    const updateAsks = useCallback((payload_data) => {
+        updateOrderAsks(payload_data);
+    }, [updateOrderBids])
+
+    const disconnectAll = () => {
+        setDisconnecting(true);
+        wss.current.send(unsubscribe_msg);
+        wss.current.close();
+
+        wss.current.onclose = function (event) {
+            clearOrders();
+            setConnected(false);
+            setDisconnecting(false);
+        };
+    }
+
+    const disableRemPrec = precision === 'P0';
+    const disableAddPrec = precision === 'P5';
 
     return (
         <View style={styles.container}>
@@ -96,38 +123,105 @@ function OrderBook(props) {
                         />
 
                         <Button
-                            btnText="Disonnect"
+                            btnText={disConnecting ? "Stopping..." : "Disonnect"}
                             btnStyles={styles.disconnectBtn}
                             onPress={disconnectAll}
-                            disabled={ready}
+                            disabled={!connected}
                         />
                     </View>
                 </SafeAreaView>
+
+                <View>
+                    <View style={{flexDirection:'row', justifyContent:'space-evenly'}}>
+                        <Button
+                            btnText={"Zoom In"}
+                            btnStyles={{width:"45%", height:40}}
+                            onPress={() => setZoom(zoom + 1)}
+                        />
+
+                        <Button
+                            btnText={"Zoom Out"}
+                            btnStyles={{width:"45%", height:40}}
+                            onPress={() => setZoom(zoom - 1)}
+                        />
+                    </View>
+                </View>
             </View>
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>ORDER BOOK</Text>
                 <View style={styles.headerIcons}>
-                    <Pressable>
-                        <Text style={styles.precisionIcon}>-</Text>
-                    </Pressable>
-                    <Pressable>
-                        <Text style={styles.precisionIcon}>+</Text>
-                    </Pressable>
+                    <TouchableOpacity onPress={disableRemPrec ? ()=>{} : removePrecision}>
+                        <Text style={[styles.precisionIcon, {
+                            opacity: disableRemPrec ? 0.3 : 1
+                        }
+                        ]}>-</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={addPrecision}>
+                        <Text style={[styles.precisionIcon, {
+                            opacity: disableAddPrec ? 0.3 : 1
+                        }
+                        ]}>+</Text>
+                    </TouchableOpacity>
                 </View>
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
                 <View style={styles.bidContainer}>
-                    <BidView bids={bids} />
+                    <BidView
+                        bids={bids}
+                        zoom={zoom}
+                    />
                 </View>
                 <View style={styles.askContainer}>
-                    <AskView asks={asks} />
+                    <AskView
+                        asks={asks}
+                        zoom={zoom}
+                    />
                 </View>
             </ScrollView>
-
-            {/* {bids.map((e, i) => <Text key={i}>{e.price}</Text>)} */}
         </View>
     );
+
+
+    const addPrecision = async () => {
+        disconnectAll();
+        switch (precision) {
+            case "P0":
+                setPrecision("P1")
+            case "P1":
+                setPrecision("P2")
+            case "P2":
+                setPrecision("P3")
+            case "P3":
+                setPrecision("P4")
+            case "P4":
+                setPrecision("P5")
+            default:
+                setPrecision("P0")
+        }
+
+        await connectAll();
+    }
+
+    const removePrecision = async () => {
+        disconnectAll();
+        switch (precision) {
+            case "P5":
+                setPrecision("P4")
+            case "P4":
+                setPrecision("P3")
+            case "P3":
+                setPrecision("P2")
+            case "P2":
+                setPrecision("P1")
+            case "P1":
+                setPrecision("P0")
+            default:
+                setPrecision("P0")
+        }
+
+        await connectAll();
+    }
 }
 
 const styles = StyleSheet.create({

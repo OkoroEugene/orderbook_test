@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
-export default function ({ asks }) {
+export default function ({ asks, zoom }) {
 
-    const [zoom, setZoom] = useState(1);
+    // const [zoom, setZoom] = useState(1);
     
     const getAskWall = (ask) => {
         const last_item = asks.length - 1;
